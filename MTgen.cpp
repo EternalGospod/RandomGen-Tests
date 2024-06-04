@@ -9,11 +9,12 @@
 #include <cmath>
 #include <map>
 #include <chrono>
+#include <random>
 
 class SHA256RandomGenerator {
 public:
     SHA256RandomGenerator() {
-        // Инициализируем начальную энтропию
+
         if (RAND_bytes(seed, sizeof(seed)) != 1) {
             throw std::runtime_error("Failed to initialize entropy source");
         }
@@ -24,15 +25,15 @@ public:
         randomBytes.reserve(numBytes);
 
         while (randomBytes.size() < numBytes) {
-            // Хешируем текущий seed с помощью SHA-256
+
             unsigned char hash[SHA256_DIGEST_LENGTH];
             SHA256(seed, sizeof(seed), hash);
 
-            // Добавляем хешированные байты к выходу
+
             size_t bytesToCopy = std::min(numBytes - randomBytes.size(), sizeof(hash));
             randomBytes.insert(randomBytes.end(), hash, hash + bytesToCopy);
 
-            // Обновляем seed
+
             memcpy(seed, hash, sizeof(seed));
         }
 
@@ -43,12 +44,17 @@ private:
     unsigned char seed[SHA256_DIGEST_LENGTH];
 };
 
-void writeToFile(const std::vector<unsigned char>& data, const std::string& filename) {
-    std::ofstream outFile(filename, std::ios::binary);
+void writeBitsToFile(const std::vector<unsigned char>& data, const std::string& filename) {
+    std::ofstream outFile(filename);
     if (!outFile) {
         throw std::runtime_error("Failed to open file for writing");
     }
-    outFile.write(reinterpret_cast<const char*>(data.data()), data.size());
+
+    for (const auto& byte : data) {
+        std::bitset<8> bits(byte);
+        outFile << bits.to_string();
+    }
+
     outFile.close();
 }
 
@@ -75,16 +81,17 @@ void runBitwiseTest(const std::vector<unsigned char>& randomBytes) {
     std::cout << "Zero count: " << zeroCount << std::endl;
     std::cout << "One count: " << oneCount << std::endl;
 
-    // Проверяем, что количество нулей и единиц примерно равно
+
     double totalBits = zeroCount + oneCount;
-    double expectedCount = totalBits / 2;
+    double expectedCount = totalBits / 2.0;
     double chiSquare = (std::pow(zeroCount - expectedCount, 2) / expectedCount) +
                        (std::pow(oneCount - expectedCount, 2) / expectedCount);
 
     std::cout << "Chi-square value: " << chiSquare << std::endl;
     
-    // Для 1 степени свободы и уровня значимости 0.05 критическое значение хи-квадрат ~3.841
-    if (chiSquare < 3.841) {
+
+    double criticalValue = 3.841; 
+    if (chiSquare < criticalValue) {
         std::cout << "Passes the bitwise test for randomness." << std::endl;
     } else {
         std::cout << "Fails the bitwise test for randomness." << std::endl;
@@ -113,7 +120,7 @@ void runBlockTest(const std::vector<unsigned char>& randomBytes, size_t blockSiz
         std::cout << pair.first << ": " << pair.second << std::endl;
     }
 
-    // Проверяем равномерное распределение блоков
+
     double expectedCount = numBlocks / std::pow(2, blockSize);
     double chiSquare = 0.0;
     for (const auto& pair : blockCount) {
@@ -122,10 +129,9 @@ void runBlockTest(const std::vector<unsigned char>& randomBytes, size_t blockSiz
 
     std::cout << "Block chi-square value: " << chiSquare << std::endl;
 
-    // Для k степеней свободы и уровня значимости 0.05 критическое значение хи-квадрат
-    double criticalValue = 24.996; // Для 1 степени свободы
+    double criticalValue = 24.996; 
     if (blockCount.size() > 1) {
-        criticalValue = 24.996; // Для 2 степеней свободы
+        criticalValue = 24.996; 
     }
     if (chiSquare < criticalValue) {
         std::cout << "Passes the block test for randomness." << std::endl;
@@ -133,7 +139,6 @@ void runBlockTest(const std::vector<unsigned char>& randomBytes, size_t blockSiz
         std::cout << "Fails the block test for randomness." << std::endl;
     }
 }
-
 
 void generateAndTestFile(size_t fileSizeMB, const std::string& filename) {
     SHA256RandomGenerator rng;
@@ -145,14 +150,11 @@ void generateAndTestFile(size_t fileSizeMB, const std::string& filename) {
     std::chrono::duration<double> generationTime = end - start;
     std::cout << "Generation time for " << fileSizeMB << " MB: " << generationTime.count() << " seconds" << std::endl;
 
-    writeToFile(randomBytes, filename);
-
-
-
+    writeBitsToFile(randomBytes, filename);
 }
 
 void generateRandomKeys(SHA256RandomGenerator& rng, size_t numKeys) {
-    size_t keySize = 32; // Assuming each key is 32 bytes
+    size_t keySize = 32; 
     auto start = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i < numKeys; ++i) {
         std::vector<unsigned char> key = rng.generateRandomBytes(keySize);
@@ -162,28 +164,36 @@ void generateRandomKeys(SHA256RandomGenerator& rng, size_t numKeys) {
     std::cout << "Generation time for " << numKeys << " keys: " << generationTime.count() << " seconds" << std::endl;
 }
 
+void testRandomKeyGeneration(SHA256RandomGenerator& rng) {
+
+    std::random_device rd;
+    std::mt19937 mt(rd());
+    std::uniform_int_distribution<size_t> dist(1000, 10000);
+    size_t numKeys = dist(mt);
+
+    std::cout << "Generating " << numKeys << " keys..." << std::endl;
+    generateRandomKeys(rng, numKeys);
+}
+
 int main() {
     try {
         SHA256RandomGenerator rng;
 
-        // Генерируем 1000 случайных байт
         std::vector<unsigned char> randomBytes = rng.generateRandomBytes(1000);
 
-        // Записываем случайные байты в файл
-        writeToFile(randomBytes, "output");
+        writeBitsToFile(randomBytes, "output.txt");
 
-        // Читаем случайные байты из файла
-        std::vector<unsigned char> readBytes = readFromFile("output");
+        std::vector<unsigned char> readBytes = readFromFile("output.txt");
 
-        // Запускаем побитовый тест
         runBitwiseTest(readBytes);
 
-        // Запускаем поблочный тест с размером блока 4 бита
-        runBlockTest(readBytes, 4);
+        runBlockTest(readBytes, 8);
 
-        generateAndTestFile(1, "output_1MB");
-        generateAndTestFile(100, "output_100MB");
-        generateAndTestFile(1000, "output_1000MB");
+        testRandomKeyGeneration(rng);
+
+        generateAndTestFile(1, "output_1MB.txt");
+        generateAndTestFile(100, "output_100MB.txt");
+        generateAndTestFile(1000, "output_1000MB.txt");
 
     } catch (const std::exception &ex) {
         std::cerr << "Error: " << ex.what() << std::endl;
@@ -192,4 +202,3 @@ int main() {
 
     return 0;
 }
-
